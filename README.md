@@ -1,104 +1,106 @@
+*Read this in other languages: [English](README.md), [Türkçe](README_tr.md).*
+
 # Macedit Keycloak SMS Authenticator
 
-**MACEDIT Kimlik Doğrulama** için geliştirilmiş Keycloak kimlik doğrulama eklentileridir. SMS tabanlı iki faktörlü kimlik doğrulama (2FA) ve özelleştirilmiş giriş akışları sağlar.
+Keycloak authentication plugins developed for **MACEDIT Authentication**. It provides SMS-based two-factor authentication (2FA) and custom login flows.
 
-## İçindekiler
+## Table of Contents
 
-- [Özellikler](#özellikler)
-- [Yapı](#yapı)
-- [Ön Koşullar](#ön-koşullar)
-- [Build Alma](#build-alma)
-- [Keycloak'a Ekleme](#keycloaka-ekleme)
-- [Yapılandırma](#yapılandırma)
-- [SMS Gateway Desteği](#sms-gateway-desteği)
-- [Direct Grant (REST API) Akışı](#direct-grant-rest-api-akışı)
-- [Önbellek (Cache) OTP Depolama](#önbellek-cache-otp-depolama)
-- [SMS Kotası ve Brute-Force Koruması](#sms-kotası-ve-brute-force-koruması)
-- [İç Ağ Bypass (Regex)](#iç-ağ-bypass-regex)
-- [Geliştirme](#geliştirme)
-- [Sorun Giderme](#sorun-giderme)
+- [Features](#features)
+- [Structure](#structure)
+- [Prerequisites](#prerequisites)
+- [Building](#building)
+- [Deployment](#deployment)
+- [Configuration](#configuration)
+- [SMS Gateway Support](#sms-gateway-support)
+- [Direct Grant (REST API) Flow](#direct-grant-rest-api-flow)
+- [Cache OTP Storage](#cache-otp-storage)
+- [SMS Quota and Brute-Force Protection](#sms-quota-and-brute-force-protection)
+- [Internal Network Bypass (Regex)](#internal-network-bypass-regex)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Özellikler
+## Features
 
 ### 1. SMS 2FA Authenticator (`sms-authenticator`)
-- Kullanıcı adı + şifre girişinden sonra SMS ile OTP doğrulama
-- Dinamik kullanıcı telefon numarası özelliği (`User Mobile Number Attribute` ayarı)
-- Özelleştirilebilir kod uzunluğu ve süre sonu (TTL)
-- SMS Kotası Koruması (Aynı kullanıcı/IP için SMS tekrar kullanımı)
-- Kaba Kuvvet (Brute-Force) koruması (3 yanlış denemede şifre iptali)
-- Özelleştirilebilir SMS mesaj şablonu
-- Simülasyon modu (test ortamları için - Event detaylarına OTP şifresi yazar)
-- İç ağ IP bypass desteği (Regex kuralları ile)
+- OTP verification via SMS after username + password login
+- Dynamic user phone number attribute (`User Mobile Number Attribute` setting)
+- Customizable code length and time-to-live (TTL)
+- SMS Quota Protection (SMS reuse strategy for the same user/IP)
+- Brute-Force protection (password reset/invalidation after 3 failed attempts)
+- Customizable SMS message template
+- Simulation mode (for testing environments - writes OTP to Event details and logs)
+- Internal network IP bypass support (using Regex rules)
 
 ### 2. SMS Direct Grant Authenticator (`sms-direct-grant-authenticator`)
-- REST API / Direct Grant akışları için SMS OTP
-- Keycloak'ın dahili önbelleği (Infinispan) ile OTP depolama (Harici veritabanı veya Redis gerektirmez)
-- Browser akışıyla tamamen aynı SMS Kota, Brute-Force koruması ve Bypass desteği
-- OAuth2 hata formatında yanıt döner (`otp_required`)
-- `otp` parametresi ile token isteğini doğrulama
+- SMS OTP for REST API / Direct Grant flows
+- OTP storage using Keycloak's internal cache (Infinispan) (No external database or Redis required)
+- Fully identical SMS Quota, Brute-Force protection, and Bypass support as the Browser flow
+- Returns response in OAuth2 error format (`otp_required`)
+- Verifies token request with `otp` parameter
 
 ---
 
-## Yapı
+## Structure
 
 ```
 sms-authenticator/
 ├── src/main/java/macedit/keycloak/authenticator/
-│   ├── SmsAuthenticator.java              # Ana SMS authenticator
-│   ├── SmsAuthenticatorFactory.java       # Factory sınıfı
-│   ├── SmsConstants.java                  # Sabitler
+│   ├── SmsAuthenticator.java              # Main SMS authenticator
+│   ├── SmsAuthenticatorFactory.java       # Factory class
+│   ├── SmsConstants.java                  # Constants
 │   ├── gateway/
-│   │   ├── SmsService.java                # SMS servis arayüzü
-│   │   ├── SmsServiceFactory.java         # SMS servis factory
-│   │   ├── TSmsService.java              # XML tabanlı SMS gateway
-│   │   └── TRestSmsService.java           # REST/JSON tabanlı SMS gateway
+│   │   ├── SmsService.java                # SMS service interface
+│   │   ├── SmsServiceFactory.java         # SMS service factory
+│   │   ├── TSmsService.java               # XML-based SMS gateway
+│   │   └── TRestSmsService.java           # REST/JSON-based SMS gateway
 │   └── directgrant/
 │       ├── SmsDirectGrantAuthenticator.java
 │       ├── SmsDirectGrantAuthenticatorFactory.java
 │       ├── SmsDirectGrantConstants.java
 │       ├── cache/
-│       │   ├── OtpStore.java              # OTP depolama arayüzü
-│       │   └── CacheOtpStore.java         # Keycloak SingleUseObjectProvider (Infinispan) implementasyonu
+│       │   ├── OtpStore.java              # OTP storage interface
+│       │   └── CacheOtpStore.java         # Keycloak SingleUseObjectProvider (Infinispan) implementation
 │       └── util/
-│           └── IpBypassUtil.java          # Regex tabanlı IP bypass yardımcı sınıfı
+│           └── IpBypassUtil.java          # Regex-based IP bypass utility
 ├── src/main/resources/theme-resources/
-│   └── templates/login-sms.ftl           # SMS giriş şablonu
+│   └── templates/login-sms.ftl           # SMS login template
 ├── pom.xml
 └── README.md
 ```
 
 ---
 
-## Ön Koşullar
+## Prerequisites
 
-- **Java:** 17 veya üzeri
-- **Maven:** 3.6+ (veya projedeki `mvnw` wrapper kullanılabilir)
-- **Keycloak:** 24.0+ (test edilen: 26.7.0)
-- **Docker:** Container ortamı için (opsiyonel)
+- **Java:** 17 or higher
+- **Maven:** 3.6+ (or use the provided `mvnw` wrapper)
+- **Keycloak:** 24.0+ (Tested with 26.7.0)
+- **Docker:** For container environment (optional)
 
 ---
 
-## Build Alma
+## Building
 
 ### SMS Authenticator
 
 ```bash
-# Proje kök dizininde
+# In the project root directory
 mvn clean package -DskipTests
 
-# Oluşan JAR dosyası:
-# target/macedit.keycloak-2fa-sms-authenticator.jar
+# Generated JAR file:
+# target/keycloak-2fa-sms-authenticator-1.0.0.jar
 ```
 
 ---
 
-## Keycloak'a Ekleme
+## Deployment
 
-### Yöntem 1: Volume Mount (Önerilen - Development)
+### Method 1: Volume Mount (Recommended for Development)
 
-Container oluştururken JAR dosyalarını volume olarak mount edin:
+Mount the JAR files as a volume when creating the container:
 
 ```bash
 docker run -d \
@@ -106,94 +108,94 @@ docker run -d \
   -p 8080:8080 \
   -e KEYCLOAK_ADMIN=admin \
   -e KEYCLOAK_ADMIN_PASSWORD=admin \
-  -v "$(pwd)/target/macedit.keycloak-2fa-sms-authenticator.jar:/opt/keycloak/providers/macedit.keycloak-2fa-sms-authenticator.jar" \
+  -v "$(pwd)/target/keycloak-2fa-sms-authenticator-1.0.0.jar:/opt/keycloak/providers/keycloak-2fa-sms-authenticator-1.0.0.jar" \
   keycloak/keycloak:latest start-dev
 ```
 
 ---
 
-## Yapılandırma
+## Configuration
 
-### Keycloak Admin Console Ayarları
+### Keycloak Admin Console Settings
 
-1. **Authentication > Flows** bölümüne gidin
-2. **Browser** akışını kopyalayın (ör: "Browser with SMS")
-3. **Add executor** > **SMS Authentication** seçin
-4. **Requirement** bölümünden **Required** veya **Alternative** seçin
-5. **Gear** (dişli) ikonuna tıklayarak yapılandırın
+1. Go to **Authentication > Flows**
+2. Copy the **Browser** flow (e.g., "Browser with SMS")
+3. Click **Add executor** > select **SMS Authentication**
+4. Set **Requirement** to **Required** or **Alternative**
+5. Click the **Gear** icon to configure
 
-### SMS Authenticator Ayarları
+### SMS Authenticator Settings
 
-| Parametre | Açıklama | Varsayılan |
-|-----------|----------|------------|
-| `User Mobile Number Attribute` | Telefon numarasının çekileceği kullanıcı attribute'u | `mobile_number` |
-| `length` | OTP kod uzunluğu | `6` |
-| `ttl` | Kod geçerlilik süresi (saniye) | `300` |
-| `SMS Reuse Strategy` | SMS Kotası: Tekrar Kullanım Stratejisi (none, user, ip, both) | `user` |
-| `Use REST API` | REST API kullan (JSON) | `true` |
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `User Mobile Number Attribute` | User attribute to fetch the phone number from | `mobile_number` |
+| `length` | OTP code length | `6` |
+| `ttl` | Code time-to-live (seconds) | `300` |
+| `SMS Reuse Strategy` | SMS Quota: Reuse Strategy (none, user, ip, both) | `user` |
+| `Use REST API` | Use REST API (JSON) | `true` |
 | `smsApiUrl` | SMS API endpoint URL | `https://api.macedit.dev/sms` |
-| `smsApiUsername` | API kullanıcı adı | - |
-| `smsApiPassword` | API şifresi | - |
-| `SenderId` | SMS gönderen adı | `MACEDIT` |
-| `App Name (REST)` | REST API için uygulama adı | `{realm}/{client}` |
-| `SMS Message Template` | SMS mesaj şablonu | `Doğrulama kodunuz: %1$s. Kod %2$d dakika boyunca geçerlidir.` |
-| `API Body Template` | Custom JSON istek gövdesi. (Opsiyonel) | `{"msgheader":"{senderId}","msg":"{message}","no":"{phone}","appname":"{appName}"}` |
-| `Bypass Internal Network` | İç ağ bypass aktif mi? | `true` |
-| `Internal IP (Regex)` | Bypass edilecek IP'ler için Regex kuralı | `^10\.243\..*` |
-| `Simulation mode` | Simülasyon modu (SMS göndermez, log ve event'e yazar) | `true` |
+| `smsApiUsername` | API username | - |
+| `smsApiPassword` | API password | - |
+| `SenderId` | SMS sender name | `MACEDIT` |
+| `App Name (REST)` | Application name for REST API | `{realm}/{client}` |
+| `SMS Message Template` | SMS message template | `Your verification code is: %1$s. Valid for %2$d minutes.` |
+| `API Body Template` | Custom JSON request body. (Optional) | `{"msgheader":"{senderId}","msg":"{message}","no":"{phone}","appname":"{appName}"}` |
+| `Bypass Internal Network` | Is internal network bypass active? | `true` |
+| `Internal IP (Regex)` | Regex rule for IP addresses to be bypassed | `^10\.243\..*` |
+| `Simulation mode` | Simulation mode (Does not send SMS, writes to log and event) | `true` |
 
-### Mesaj Şablonu Değişkenleri
+### Message Template Variables
 
-- `%1$s` → OTP kodu
-- `%2$d` → Kalan dakika
+- `%1$s` → OTP code
+- `%2$d` → Remaining minutes
 
-Örnek: `"MACEDIT Doğrulama kodunuz: %1$s. %2$d dakika geçerlidir."`
+Example: `"MACEDIT Verification code: %1$s. Valid for %2$d min."`
 
 ---
 
-## SMS Gateway Desteği
+## SMS Gateway Support
 
 ### XML API 
 
-`Use REST API = false` iken XML formatında istek gönderilir:
+When `Use REST API = false`, the request is sent in XML format:
 
 ```xml
 <?xml version='1.0' encoding='iso-8859-9'?>
 <mainbody>
   <header/>
   <body>
-    <msg><![CDATA[Doğrulama kodunuz: 123456]]></msg>
+    <msg><![CDATA[Your verification code: 123456]]></msg>
     <no>5XXXXXXXXX</no>
   </body>
 </mainbody>
 ```
 
-### REST API (JSON) - Varsayılan
+### REST API (JSON) - Default
 
-`Use REST API = true` iken JSON formatında istek gönderilir:
+When `Use REST API = true`, the request is sent in JSON format:
 
 ```json
 {
   "msgheader": "MACEDIT",
-  "msg": "Doğrulama kodunuz: 123456",
+  "msg": "Your verification code is: 123456",
   "no": "5XXXXXXXXX",
   "appname": "myapp/master/security-admin-console"
 }
 ```
 
-### Telefon Numarası Temizleme
+### Phone Number Sanitization
 
-Numaralar otomatik olarak temizlenir:
+Numbers are automatically sanitized:
 - `+90 5XX XXX XX XX` → `5XXXXXXXXX`
 - `+9 5XXXXXXXXX` → `5XXXXXXXXX`
 - `90 5XXXXXXXXX` → `5XXXXXXXXX`
-- Boşluklar kaldırılır
+- Spaces are removed
 
 ---
 
-## Direct Grant (REST API) Akışı
+## Direct Grant (REST API) Flow
 
-### Adım 1: OTP İsteği
+### Step 1: OTP Request
 
 ```bash
 curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
@@ -203,7 +205,7 @@ curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
   -d "password=pass123"
 ```
 
-** Yanıt (OTP gönderildi, hata olarak döner):**
+** Response (OTP sent, returns an error):**
 
 ```json
 {
@@ -212,9 +214,9 @@ curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
 }
 ```
 
-> Bu beklenen bir davranıştır. İlk istekte OTP üretilir ve SMS ile gönderilir.
+> This is the expected behavior. On the first request, an OTP is generated and sent via SMS.
 
-### Adım 2: OTP Doğrulama
+### Step 2: OTP Verification
 
 ```bash
 curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
@@ -225,7 +227,7 @@ curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
   -d "otp=123456"
 ```
 
-**Başarılı Yanıt:**
+**Success Response:**
 
 ```json
 {
@@ -239,137 +241,134 @@ curl -X POST http://localhost:8080/realms/master/protocol/openid-connect/token \
 
 ---
 
-## Önbellek (Cache) OTP Depolama
+## Cache OTP Storage
 
-Direct Grant ve Browser akışlarının tümünde OTP'ler Keycloak'ın dahili Infinispan önbelleğinde (`SingleUseObjectProvider`) saklanır. Harici bir veritabanına veya Redis'e ihtiyaç yoktur. Cluster ortamlarında otomatik olarak senkronize olur.
+In all Direct Grant and Browser flows, OTPs are stored in Keycloak's internal Infinispan cache (`SingleUseObjectProvider`). No external database or Redis is needed. It automatically synchronizes in Cluster environments.
 
-### Key Formatı
+### Key Format
 
 ```
 smsotp:{realm}:{clientId}:{username}
 ```
-*(Eğer IP tabanlı SMS Tekrar stratejisi kullanılıyorsa anahtarın sonuna IP adresi de eklenir)*
+*(If IP-based SMS Reuse strategy is used, the IP address is also appended to the key)*
 
 ---
 
-## SMS Kotası ve Brute-Force Koruması
+## SMS Quota and Brute-Force Protection
 
-**1. Kaba Kuvvet (Brute-Force) Koruması:** Kullanıcı 3 defa hatalı SMS şifresi girerse, OTP kodu sunucu tarafından anında iptal edilir ve kullanıcıdan yeni bir SMS talep etmesi istenir. Deneme yanılma ile şifre kırılamaz.
+**1. Brute-Force Protection:** If a user enters an incorrect SMS password 3 times, the OTP code is immediately invalidated by the server, and the user is required to request a new SMS. Passwords cannot be cracked by trial and error.
 
-**2. SMS Tekrar Stratejisi (Rate Limiting):** Kötü niyetli kişilerin arka arkaya SMS talebi atarak kurumun SMS kotasını tüketmesini engellemek için, Keycloak Admin UI üzerinden **SMS Reuse Strategy** ayarını kullanabilirsiniz:
-- `none`: Her defasında yeni SMS gönderilir.
-- `user`: Aynı kullanıcı SMS geçerlilik süresi (TTL) dolana kadar istek yaparsa, yeni SMS gönderilmez, eski şifrenin girilmesi beklenir. (Önerilen/Varsayılan)
-- `ip`: Aynı IP adresinden gelen isteklerde eski şifrenin girilmesi beklenir. *(Keycloak sunucusunun proxy=edge ayarı ile X-Forwarded-For okuyabildiğinden emin olun)*
-- `both`: Hem kullanıcı hem IP eşleştiğinde koruma devreye girer.
+**2. SMS Reuse Strategy (Rate Limiting):** To prevent malicious individuals from consuming the organization's SMS quota by sending consecutive SMS requests, you can use the **SMS Reuse Strategy** setting via the Keycloak Admin UI:
+- `none`: A new SMS is sent every time.
+- `user`: If the same user requests again before the SMS Time-To-Live (TTL) expires, a new SMS is not sent, and the old code is expected. (Recommended/Default)
+- `ip`: Expected to enter the old code for requests coming from the same IP address. *(Ensure Keycloak server can read X-Forwarded-For with proxy=edge setting)*
+- `both`: Protection kicks in when both user and IP match.
 
 ---
 
-## İç Ağ Bypass (Regex)
+## Internal Network Bypass (Regex)
 
-Özellikle development/test ortamlarında veya kurum içi güvenli cihazlardan SMS göndermeden giriş yapabilmek için iç IP adreslerini Regex kuralları ile bypass edebilirsiniz.
+You can bypass internal IP addresses using Regex rules to log in without sending SMS, especially for development/testing environments or from secure internal company devices.
 
-### Nasıl Çalışır
+### How it Works
 
-1. `Bypass Internal Network = true` olarak ayarlayın
-2. `Internal IP (Regex)` parametresine Regex kuralları girin (virgülle ayırarak çoklu kural girebilirsiniz).
-3. İstemci IP adresi kurallardan biriyle tam olarak eşleşiyorsa OTP doğrulaması atlanır.
+1. Set `Bypass Internal Network = true`
+2. Enter Regex rules in the `Internal IP (Regex)` parameter (you can enter multiple rules separated by commas).
+3. If the client IP address exactly matches one of the rules, OTP verification is skipped.
 
-### Örnekler
+### Examples
 
 ```
-^10\.243\..*                        # 10.243. ile başlayan herhangi bir IP
-^192\.168\.1\.50$                   # Yalnızca tam olarak 192.168.1.50 IP adresi
-^172\.(16|17)\..*, ^127\.0\.0\.1$   # Virgülle ayrılmış çoklu kurallar
+^10\.243\..*                        # Any IP starting with 10.243.
+^192\.168\.1\.50$                   # Only exactly 192.168.1.50 IP address
+^172\.(16|17)\..*, ^127\.0\.0\.1$   # Comma-separated multiple rules
 ```
 
 ---
 
-## Simülasyon Modu
+## Simulation Mode
 
-Gerçek telefonlara SMS gitmesini istemediğiniz development ve test ortamları için `Simulation mode` seçeneğini aktif edebilirsiniz. 
+For development and testing environments where you don't want SMS to be sent to real phones, you can enable the `Simulation mode` option.
 
-Simülasyon modu açıkken:
-- SMS Gateway API **tetiklenmez**.
-- SMS içeriği ve doğrulama kodu (OTP) Keycloak **server loglarına** uyarı (WARN) olarak yazdırılır.
-- Aynı zamanda Keycloak'taki Admin UI **Events (Olaylar)** sayfasında, kullanıcının eyleminin (CUSTOM_REQUIRED_ACTION) ayrıntılarında `code: 123456` bilgisi bulunur.
+When Simulation mode is on:
+- SMS Gateway API is **not triggered**.
+- The SMS content and Verification Code (OTP) are printed to the Keycloak **server logs** as a WARNING (WARN).
+- At the same time, the `code: 123456` information is found in the details of the user's action (CUSTOM_REQUIRED_ACTION) on the **Events** page in the Keycloak Admin UI.
 
-> **Uyarı:** Canlı (Production) ortamlarda şifrelerin loglanmaması ve gerçek SMS gönderilmesi için Simülasyon modunun kesinlikle **kapalı (false)** olması gerekir.
+> **Warning:** Simulation mode must strictly be **off (false)** in Production environments so that passwords are not logged and real SMS are sent.
 
 ---
 
-## Geliştirme
+## Development
 
-### Ortam Kurulumu
+### Environment Setup
 
 ```bash
-# Java 17+ kurulu olmalı
+# Java 17+ must be installed
 java -version
 
-# Maven kurulu olmalı (veya mvnw wrapper kullanın)
+# Maven must be installed (or use mvnw wrapper)
 mvn -version
 
-# Keycloak kaynak kodunu indirin (opsiyonel, referans için)
+# Clone Keycloak source code (optional, for reference)
 git clone https://github.com/keycloak/keycloak.git
 ```
 
-### Proje Yapısı
+### Project Structure
 
-- `SmsAuthenticator` → Browser akışları için ana authenticator
-- `SmsDirectGrantAuthenticator` → REST API akışları için authenticator
-- `SmsServiceFactory` → SMS gateway seçimi (XML/REST/Simülasyon)
-- `CacheOtpStore` → Keycloak Infinispan tabanlı ortak OTP depolama ve kota sayacı
-- `IpBypassUtil` → Regex tabanlı IP güvenlik kalkanı
-
----
-
-## Sorun Giderme
-
-### Plugin Yüklenmedi
-
-**Sorun:** Console'da SMS authenticator görünmüyor
-
-**Çözüm:**
-1. Container loglarını kontrol edin: `docker logs keycloak-test`
-2. JAR dosyasının `/opt/keycloak/providers/` dizininde olduğundan emin olun
-3. Container'ı yeniden başlatın: `docker restart keycloak-test`
-
-### SMS Gönderilmiyor
-
-**Sorun:** Kod üretiliyor ama SMS gelmiyor
-
-**Çözüm:**
-1. `Simulation mode = true` mi? Loglara bakın. Doğrulama kodunu loglarda görüyorsanız, SMS Gateway çağrılmaz. Canlı kullanım için kapatın.
-2. `smsApiUrl` doğru mu?
-3. `smsApiUsername` ve `smsApiPassword` doğru mu?
-4. API yanıt kodunu kontrol edin (200 olmalı)
-
-### Direct Grant Hatası
-
-**Sorun:** `otp_store_failed` hatası
-
-**Çözüm:**
-1. Keycloak Infinispan cluster ayarlarının düzgün çalıştığını kontrol edin.
-2. Sunucu bellek kapasitesinin dolmadığından emin olun.
+- `SmsAuthenticator` → Main authenticator for Browser flows
+- `SmsDirectGrantAuthenticator` → Authenticator for REST API flows
+- `SmsServiceFactory` → SMS gateway selection (XML/REST/Simulation)
+- `CacheOtpStore` → Keycloak Infinispan-based shared OTP storage and quota counter
+- `IpBypassUtil` → Regex-based IP security shield
 
 ---
 
-## Log Örnekleri
+## Troubleshooting
+
+### Plugin Not Loaded
+
+**Issue:** SMS authenticator is not visible in the Console
+
+**Solution:**
+1. Check container logs: `docker logs keycloak-test`
+2. Ensure the JAR file is in the `/opt/keycloak/providers/` directory
+3. Restart the container: `docker restart keycloak-test`
+
+### SMS Not Sent
+
+**Issue:** Code is generated but SMS is not received
+
+**Solution:**
+1. Is `Simulation mode = true`? Check the logs. If you see the verification code in the logs, the SMS Gateway is not called. Turn it off for live use.
+2. Is `smsApiUrl` correct?
+3. Are `smsApiUsername` and `smsApiPassword` correct?
+4. Check the API response code (should be 200)
+
+### Direct Grant Error
+
+**Issue:** `otp_store_failed` error
+
+**Solution:**
+1. Verify that Keycloak Infinispan cluster settings are working correctly.
+2. Ensure server memory capacity is not full.
+
+---
+
+## Log Examples
 
 ```
-# Başarılı SMS gönderimi
+# Successful SMS delivery
 INFO  [macedit.keycloak.authenticator.gateway.TRestSmsService] REST SMS sent to 5XXXXXXXXX | Response: 200 | Body: ...
 
 # Internal IP bypass
 WARN  [macedit.keycloak.authenticator.SmsAuthenticator] Logged With Internal IP: 192.168.1.100
 
-# Simülasyon modu
+# Simulation mode
 WARN  ***** SIMULATION MODE ***** 
-Would send SMS to 5XXXXXXXXX with text: Doğrulama kodunuz: 123456. Kod 5 dakika boyunca geçerlidir.
+Would send SMS to 5XXXXXXXXX with text: Your verification code is: 123456. Valid for 5 minutes.
 Code: 123456
 
-# OTP Kaba Kuvvet Koruması
+# OTP Brute-Force Protection
 WARN  [macedit.keycloak.authenticator.SmsAuthenticator] Max OTP attempts reached | Key: user1
 ```
-
----
-
